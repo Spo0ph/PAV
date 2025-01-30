@@ -1,0 +1,39 @@
+name: Täglicher SP500 Signal Generator
+
+on:
+  schedule:
+    - cron: '0 6 * * *'  # Täglich um 6:00 UTC
+  workflow_dispatch:      # Ermöglicht manuelles Auslösen
+
+jobs:
+  run-script:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Repository auschecken
+        uses: actions/checkout@v3
+
+      - name: Python einrichten
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Abhängigkeiten installieren
+        run: pip install pandas numpy requests
+
+      - name: Skript ausführen
+        run: python Spo0ph/Altersvorsorge/sp500data.py
+
+      - name: Änderungen committen und pushen
+        run: |
+          git config --local user.name "Spo0ph"
+          git config --local user.email "conradfritsche@gmx.de"
+          git add sp500_with_signals.csv
+          if ! git diff --staged --quiet; then
+            git commit -m "Automatisches Update der Signal-Datei am $(date +'%Y-%m-%d')"
+            git push
+          else
+            echo "Keine Änderungen zum Committen."
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
