@@ -22,7 +22,7 @@ jobs:
         run: pip install pandas numpy requests
 
       - name: Skript ausführen
-        run: python Spo0ph/PAV/sp500data.py
+        run: python sp500data.py
 
       - name: Änderungen committen und pushen
         run: |
