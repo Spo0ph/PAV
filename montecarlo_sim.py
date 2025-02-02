@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # CSV-Datei einlesen
-df = pd.read_csv("montecarlo_data.csv")
+df = pd.read_csv("time_series_data.csv")
 
 # Berechnung des arithmetischen Mittelwerts für jede Periode
 mean_growth = df.mean(axis=1)
@@ -42,7 +42,7 @@ summary_df = pd.DataFrame({
     "Mittelwert": mean_growth,
     "Standardabweichung": std_dev
 })
-summary_df.to_csv("growth_summary.csv", index=False)
+summary_df.to_csv("montecarlo_sim.csv", index=False)
 
 # Ausgabe der mittleren Standardabweichung
 print(f"Mittlere Standardabweichung über alle Perioden: {mean_std_dev:.4f}")
