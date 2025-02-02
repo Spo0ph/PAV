@@ -1,117 +1,101 @@
 import pandas as pd
-from datetime import datetime, timedelta
 
-def monte_carlo_simulation_from_csv(input_csv='sp500_with_signals.csv', daily_savings=25, start_amount=0, years=34, num_simulations=1000, output_csv='montecarlo_data.csv'):
-    """
-    Führe eine Monte-Carlo-Simulation für Sparszenarien durch basierend auf einer CSV-Datei mit den relevanten Spalten 'Close' und 'Signal'.
-    Inklusive Steuerberechnung, TER, Gebühren und Steuerfreibeträgen.
+# 1. CSV einlesen und Zeitraum festlegen (z. B. 1970 bis 2003 inkl.)
+df = pd.read_csv("sp500_with_signals.csv", parse_dates=["Date"])
+start_date = pd.Timestamp("1970-01-01")
+end_date = pd.Timestamp("2003-12-31")  # 34 Jahre ab 1970
+df = df[(df["Date"] >= start_date) & (df["Date"] <= end_date)].copy()
+df.sort_values("Date", inplace=True)
+df.reset_index(drop=True, inplace=True)
+
+# 2. Tägliche Rendite berechnen (hier wird der Schlusskurs "Close" verwendet)
+df["daily_return"] = df["Close"].pct_change().fillna(0)
+
+# 3. Parameter
+TER_daily = 0.006 / 200   # Täglicher TER-Abzug (0,6% p.a. über 200 Handelstage)
+deposit_amount = 25.0
+
+# 4. Kontostände und weitere Variablen initialisieren
+ETF_depot = 0.0           # aktueller Wert im ETF-Depot
+cash = 0.0                # aktueller Stand im Tagesgeldkonto
+cost_basis = 0.0          # Summe der eingezahlten Beträge (abzüglich Gebühren) im Depot
+pending_realized_profit = 0.0  # Gewinne, die bereits realisiert, aber noch nicht versteuert wurden
+
+# 5. Ergebnisliste (für die tägliche Zeitreihe)
+results = []
+
+n = len(df)
+for i, row in df.iterrows():
+    current_date = row["Date"]
+    current_year = current_date.year
+
+    # (A) Marktentwicklung & TER-Abzug (nur wenn im ETF investiert)
+    if ETF_depot > 0:
+        # Tägliche Kursentwicklung anwenden (über den Schlusskurs "Close")
+        ETF_depot *= (1 + row["daily_return"])
+        # TER-Gebühr abziehen
+        ETF_depot *= (1 - TER_daily)
+
+    # (B) Jahressteuer: Am letzten Tag eines Kalenderjahres werden realisierte Gewinne versteuert
+    is_last_day_of_year = False
+    if i == n - 1:
+        is_last_day_of_year = True
+    else:
+        next_year = df.loc[i+1, "Date"].year
+        if next_year != current_year:
+            is_last_day_of_year = True
+
+    if is_last_day_of_year:
+        # Es wird angenommen, dass nur 70% der realisierten Gewinne steuerpflichtig sind.
+        if pending_realized_profit > 0:
+            tax = pending_realized_profit * 0.7 * 0.305
+            # Steuer wird vom Tagesgeldkonto abgezogen
+            cash -= tax
+            pending_realized_profit = 0.0
+
+    # (C) Transaktionsentscheidung anhand des Signals
+    signal = str(row["Signal"]).strip()  # Signal als String (kann auch leer sein)
     
-    :param input_csv: Name der Eingabedatei mit den Kursdaten
-    :param daily_savings: Tägliche Sparrate in Euro
-    :param start_amount: Anfangsbetrag
-    :param years: Dauer der Sparphase in Jahren (wird auf 34 Jahre festgelegt)
-    :param num_simulations: Anzahl der durchzuführenden Simulationen
-    :param output_csv: Name der Ausgabedatei für die CSV
-    :return: None
-    """
-    # Lade die CSV-Datei und stelle sicher, dass das Datumsformat korrekt interpretiert wird
-    df = pd.read_csv(input_csv, parse_dates=['Date'])
-    df.set_index('Date', inplace=True)
-    
-    # Überprüfe, ob die relevanten Spalten vorhanden sind
-    required_columns = ['Close', 'Signal']
-    for column in required_columns:
-        if column not in df.columns:
-            raise ValueError(f"Die Spalte '{column}' fehlt in der CSV-Datei.")
-    
-    # Bestimmen des aktuellen Datums und des Startdatums der letzten 34 Jahre
-    today = datetime.today()
-    start_date = today - timedelta(days=(years + 21) * 365)  # Berechnet das Startdatum für die letzten 34 Jahre plus 21 Jahre
-    
-    # Filtern der Daten für den Zeitraum
-    df_filtered = df[df.index >= pd.to_datetime(start_date)]
-    
-    # Generiere alle Startdaten innerhalb des Zeitrahmens (zwischen Startdatum und heutigem Datum)
-    all_start_dates = pd.date_range(start=start_date, end=today, freq='MS').strftime('%Y-%m-%d').tolist()
+    if signal == "BUY_2x":
+        # Nur wenn aktuell kein ETF-Investment vorhanden ist
+        if ETF_depot == 0 and cash > 0:
+            # Gesamtes Geld (abzüglich 1€ Gebühr) wird investiert
+            transfer_amount = cash - 1.0 if cash > 1.0 else 0.0
+            ETF_depot = transfer_amount
+            cost_basis = transfer_amount
+            cash = 0.0
+    elif signal == "SELL":
+        # Nur wenn aktuell im ETF investiert
+        if ETF_depot > 0:
+            sale_proceeds = ETF_depot
+            profit = sale_proceeds - cost_basis
+            # Nur positive Gewinne führen zu Steuerpflicht
+            if profit > 0:
+                pending_realized_profit += profit
+            # Verkauf: Geld wird dem Tagesgeldkonto gutgeschrieben
+            cash += sale_proceeds
+            ETF_depot = 0.0
+            cost_basis = 0.0
+    # Bei einem leeren Signal (HOLD) wird nichts geändert.
 
-    # Berechnung der täglichen TER (0,6% pro Jahr)
-    daily_TER = 0.006 / 365  # Tägliche TER in Dezimalform
+    # (D) Tägliche Einzahlung von 25€
+    if ETF_depot > 0:
+        ETF_depot += deposit_amount
+        cost_basis += deposit_amount  # neuer Sparbeitrag wird in die Kostenbasis aufgenommen
+    else:
+        cash += deposit_amount
 
-    # Simulation der Sparszenarien
-    results = []
-    for simulation in range(num_simulations):
-        simulation_results = []
-        for start in all_start_dates:
-            # Bestimme den Startindex für das Startdatum
-            start_date = pd.to_datetime(start)
-            if start_date not in df_filtered.index:
-                continue  # Falls das Startdatum nicht existiert, überspringe diese Simulation
-            
-            start_idx = df_filtered.index.get_loc(start_date)
-            Depotwert = start_amount
-            Tagesgeldwert = 0  # Das Geld, das auf dem Tagesgeldkonto geparkt ist
-            total_value = Depotwert
-            taxable_gain = 0  # Steuerpflichtiger Gewinn
-            total_taxes_paid = 0  # Insgesamt gezahlte Steuern
-            purchased_once = False  # Flag, das anzeigt, ob bereits einmal vollständig gekauft wurde
-            
-            # Simulation für die Sparphase (34 Jahre)
-            for day in range(years * 365):
-                if start_idx + day < len(df_filtered) - 1:  # Stelle sicher, dass wir einen Folgetag haben
-                    # Nächster Kurswert (Close-Preis)
-                    close_price_today = df_filtered.iloc[start_idx + day]['Close']
-                    close_price_next_day = df_filtered.iloc[start_idx + day + 1]['Close']
-                    signal = df_filtered.iloc[start_idx + day]['Signal']
-                    
-                    # 1. **TER** vor dem Kauf/Verkauf und Steuerberechnung abziehen
-                    total_value -= total_value * daily_TER  # Täglicher TER-Abzug nur vom Depotwert
+    # (E) Gesamtportfolio ermitteln und Tagesschritt speichern
+    portfolio_value = ETF_depot + cash
+    results.append({
+        "Date": current_date,
+        "PortfolioValue": portfolio_value,
+        "ETF_depot": ETF_depot,
+        "Cash": cash
+    })
 
-                    # Tägliches Sparen
-                    Depotwert += daily_savings
-                
-                    # Berechne die tägliche Kursänderung (Prozentsatz)
-                    daily_change = (close_price_next_day - close_price_today) / close_price_today
-                    
-                    if pd.notna(signal):
-                        if 'BUY' in signal:
-                            if not purchased_once and total_value >= 250:
-                                # Bei "Kaufen" wird der gesamte Betrag investiert und keine Gebühr abgezogen
-                                Depotwert = total_value
-                                total_value = Depotwert * (1 + daily_change)  # Kursänderung anwenden
-                                purchased_once = True  # Markiert, dass der erste Kauf stattgefunden hat
-                            elif total_value < 250:
-                                # Wenn der Kaufbetrag unter 250€ liegt, wird nur mit der Sparrate gekauft und 1€ Gebühr abgezogen
-                                Depotwert += daily_savings - 1  # 1€ Gebühr für Käufe < 250€
-                                total_value = Depotwert * (1 + daily_change)
-                        elif 'SELL' in signal:
-                            # Bei "Verkaufen" wird die gesamte Position verkauft
-                            Tagesgeldwert = total_value
-                            total_value = 0  # Geld geparkt, keine Kursänderung
-                        
-                    # **Depotwert** wächst täglich um den Prozentsatz der Kursänderung, wenn im Depot
-                    if total_value > 0 and Tagesgeldwert == 0:  # Wenn im Depot, wird täglich die Kursänderung angewendet
-                        total_value *= (1 + daily_change)  # Depotwert wächst oder fällt je nach Kursänderung
-                    
-                    # Jährliche Steuerberechnung und Gebührenabzug
-                    if (start_idx + day) % 365 == 0:  # Jedes Jahr
-                        yearly_gain = total_value - Depotwert  # Gewinn im Jahr
-                        if yearly_gain > 0:
-                            # Steuerpflichtiger Gewinn (70% steuerfrei)
-                            taxable_gain = yearly_gain * 0.7
-                            # Berechne Abgeltungssteuer (25%)
-                            tax = taxable_gain * 0.25  # 25% Abgeltungssteuer
-                            solidarity_surcharge = tax * 0.055  # 5,5% Solidaritätszuschlag
-                            total_taxes_paid += tax + solidarity_surcharge
-                            total_value -= (tax + solidarity_surcharge)  # Steuern abziehen
+# 6. Ergebnis als CSV abspeichern
+results_df = pd.DataFrame(results)
+results_df.to_csv("time_series_data.csv", index=False)
 
-            simulation_results.append(total_value)
-        results.append(simulation_results)
-
-    # Erstelle DataFrame und speichere es als CSV
-    df_results = pd.DataFrame(results, columns=all_start_dates)
-    df_results.index = [f'Simulation {i+1}' for i in range(num_simulations)]
-    df_results.to_csv(output_csv)
-    print(f"Monte Carlo Simulation abgeschlossen. Ergebnisse in '{output_csv}' gespeichert.")
-
-# Start der Simulation mit der Eingabedatei 'sp500_with_signals.csv'
-monte_carlo_simulation_from_csv(input_csv='sp500_with_signals.csv')
+print("Simulation abgeschlossen. Ergebnisse in 'time_series_data.csv' gespeichert.")
