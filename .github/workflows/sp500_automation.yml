@@ -1,0 +1,63 @@
+# .github/workflows/daily_trade.yml
+name: Daily SP500 Pipeline & Trading
+on:
+  schedule:
+    - cron: '0 13 * * *'  # Täglich um 14:00 MESZ = 12:00 UTC
+  workflow_dispatch:
+
+jobs:
+  sp500:
+    runs-on: ubuntu-latest
+    services:
+      ibgateway:
+        image: ghcr.io/interactivebrokers/ibgateway:latest
+        ports:
+          - 4001:4001
+        options: >-
+          --entrypoint=/bin/sh
+        env:
+          USERNAME: ${{ secrets.IBKR_USER }}
+          PASSWORD: ${{ secrets.IBKR_PASS }}
+          TRUSTED_IPS: 0.0.0.0/0
+          ENABLE_SOCKETS: "1"
+
+    steps:
+      # 1. Repository auschecken
+      - name: Check out repository
+        uses: actions/checkout@v3
+
+      # 2. Python-Umgebung einrichten
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      # 3. Abhängigkeiten installieren
+      - name: Install dependencies
+        run: |
+          pip install requests pandas
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      # 4. SP500-Pipeline ausführen (unabhängig vom Gateway)
+      - name: Run SP500 Pipeline
+        run: |
+          echo "Starte sp500_pipeline.py"
+          python sp500_pipeline.py
+
+      # 5. Kurzes Delay, bis IB Gateway einsatzbereit ist
+      - name: Wait for IB Gateway
+        run: |
+          echo "Warte auf IB Gateway..."
+          sleep 30
+
+      # 6. SP500 Agent ausführen
+      - name: Run SP500 Agent
+        env:
+          IBKR_USER: ${{ secrets.IBKR_USER }}
+          IBKR_PASS: ${{ secrets.IBKR_PASS }}
+          UPRO_CONID: ${{ secrets.UPRO_CONID }}
+          API_HOST: localhost
+          API_PORT: 4001
+        run: |
+          echo "Starte sp500_agent.py"
+          python sp500_agent.py
