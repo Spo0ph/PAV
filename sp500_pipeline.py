@@ -1,66 +1,103 @@
+import os
+import logging
+from logging.handlers import RotatingFileHandler
 import pandas as pd
+import requests
+from datetime import datetime
 
-# 1. Daten einlesen
-url = 'https://stooq.com/q/d/l/?s=^spx&i=d'
-df = pd.read_csv(
-    url,
-    parse_dates=['Date'],
-    index_col='Date'
+# --- Logging-Konfiguration ---
+LOG_FILE = os.getenv("PAV_LOGFILE", "pav_pipeline.log")
+LOG_LEVEL = os.getenv("PAV_LOGLEVEL", "INFO").upper()
+
+logger = logging.getLogger("pav")
+logger.setLevel(LOG_LEVEL)
+
+file_handler = RotatingFileHandler(
+    LOG_FILE, maxBytes=5*1024*1024, backupCount=3, encoding="utf-8"
 )
-
-# 2. Buy & Hold-Signal (jeder Tag 'BUY')
-df['B&H'] = 'BUY'
-
-# 3. SMA375 berechnen
-window = 375  # Fenstergröße in Handelstagen
-df['SMA375'] = df['Close'].rolling(window=window, min_periods=1).mean()
-
-# 4. SMA-Signal: BUY wenn Close > SMA375, sonst SELL
-df['SMA_Signal'] = df.apply(
-    lambda row: 'BUY' if row['Close'] > row['SMA375'] else 'SELL',
-    axis=1
+formatter = logging.Formatter(
+    "%(asctime)s %(levelname)-8s [%(name)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
 )
+file_handler.setFormatter(formatter)
+logger.addHandler(file_handler)
 
-# 5. Drawdown-Berechnung
-#   ATH = All Time High bis zum aktuellen Datum
-df['ATH'] = df['Close'].cummax()
-#   Verhältnis zum ATH
-df['DD_Ratio'] = df['Close'] / df['ATH']
+# Optional: Ausgabe auch in die Konsole
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(formatter)
+logger.addHandler(console_handler)
+# ------------------------------
 
-# 6. SMA+DD-Signal und Countdown
-signals = []
-countdowns = []
-countdown = 0
+STOOQ_URL = "https://stooq.com/q/d/l/"
+SYMBOL = "^spx"
+SMA_WINDOW = 375
+DD_COUNTDOWN_RESET = 425
+LEVERAGE = 3
+OUTPUT_CSV = "sp500_signals.csv"
 
-for dd_ratio, sma_signal in zip(df['DD_Ratio'], df['SMA_Signal']):
-    if countdown > 0:
-        signals.append('BUY')
-        countdown -= 1
-        countdowns.append(countdown)
-    elif dd_ratio < 0.7:
-        countdown = 425
-        signals.append('BUY')
-        countdown -= 1
-        countdowns.append(countdown)
-    else:
-        signals.append(sma_signal)
-        countdowns.append(0)
 
-df['SMA_DD_Signal'] = signals
-df['DD_Countdown'] = countdowns
+def load_data():
+    """Lädt historische S&P 500-Daten von Stooq.com."""
+    params = {"s": SYMBOL, "i": "d"}
+    logger.info(f"Lade Daten für {SYMBOL} von Stooq")
+    resp = requests.get(STOOQ_URL, params=params)
+    resp.raise_for_status()
+    df = pd.read_csv(pd.compat.StringIO(resp.text), parse_dates=["Date"], index_col="Date")
+    logger.info(f"Daten geladen: {len(df)} Zeilen von {df.index.min().date()} bis {df.index.max().date()}")
+    return df
 
-# 7. Hebel simulieren: Close x3
-#    neuer Wert, um dreifachen Hebel zu imitieren und auf 2 Nachkommastellen runden
-df['Close_x3'] = (df['Close'] * 3).round(2)
 
-# 8. Hilfsgrößen auf 2 Nachkommastellen runden
-df['Volume'] = df['Volume'].round(2)
-df['SMA375'] = df['SMA375'].round(2)
-df['ATH'] = df['ATH'].round(2)
-df['DD_Ratio'] = df['DD_Ratio'].round(2)
+def compute_signals(df):
+    """Berechnet SMA, Drawdown-Regeln und Hebel."""
+    logger.info(f"Berechne {SMA_WINDOW}-Tag-SMA")
+    df['SMA'] = df['Close'].rolling(window=SMA_WINDOW).mean()
+    df['SMA_Signal'] = df['Close'] > df['SMA']
+    df['SMA_Signal'] = df['SMA_Signal'].map({True: 'BUY', False: 'SELL'})
 
-# 9. CSV exportieren
-output_file = 'sp500_signals.csv'
-df.to_csv(output_file)
+    logger.info("Bestimme All-Time-High und Drawdown")
+    df['ATH'] = df['Close'].cummax()
+    df['DD_Ratio'] = df['Close'] / df['ATH']
 
-print(f"Fertig! CSV mit gerundeten Signalen und Hebel-Spalte unter '{output_file}' abgelegt.")
+    # Countdown-Mechanismus
+    logger.info("Wende Drawdown-Countdown-Regel an")
+    countdown = 0
+    signals = []
+    for dd in df['DD_Ratio']:
+        if dd < 0.7:
+            countdown = DD_COUNTDOWN_RESET
+        else:
+            countdown = max(countdown - 1, 0)
+        signals.append('BUY' if countdown > 0 else None)
+    df['DD_Signal'] = signals
+
+    # Kombiniertes Signal
+    df['Signal'] = df['DD_Signal'].fillna(df['SMA_Signal'])
+
+    # Hebel-Spalte
+    df['Close_x3'] = (df['Close'] * LEVERAGE).round(2)
+
+    logger.info(f"Signale berechnet für {len(df)} Datenpunkte")
+    return df
+
+
+def save_csv(df):
+    """Speichert das Ergebnis als CSV."""
+    df_out = df[['Close', 'SMA', 'SMA_Signal', 'ATH', 'DD_Ratio', 'Signal', 'Close_x3']]
+    df_out.to_csv(OUTPUT_CSV)
+    logger.info(f"Ergebnisse in {OUTPUT_CSV} geschrieben")
+
+
+def main():
+    logger.info("Starte sp500_pipeline")
+    try:
+        df = load_data()
+        df = compute_signals(df)
+        save_csv(df)
+        logger.info("Pipeline erfolgreich abgeschlossen")
+    except Exception:
+        logger.exception("Fehler in der Pipeline")
+        raise
+
+
+if __name__ == '__main__':
+    main()

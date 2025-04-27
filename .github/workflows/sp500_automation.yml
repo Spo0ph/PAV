@@ -1,63 +1,87 @@
-# .github/workflows/daily_trade.yml
-name: Daily SP500 Pipeline & Trading
+name: sp500_automation
+
 on:
   schedule:
-    - cron: '0 13 * * *'  # Täglich um 14:00 MESZ = 12:00 UTC
-  workflow_dispatch:
+    # Mo–Fr um 14:12 MESZ (12:12 UTC)
+    - cron: '12 12 * * 1-5'
+  workflow_dispatch:  # manuelles Auslösen
 
 jobs:
-  sp500:
+  build-and-trade:
     runs-on: ubuntu-latest
+
     services:
       ibgateway:
-        image: ghcr.io/interactivebrokers/ibgateway:latest
-        ports:
-          - 4001:4001
-        options: >-
-          --entrypoint=/bin/sh
+        image: ghcr.io/gnzsnz/ib-gateway:stable          # korrigiertes Image
         env:
-          USERNAME: ${{ secrets.IBKR_USER }}
-          PASSWORD: ${{ secrets.IBKR_PASS }}
-          TRUSTED_IPS: 0.0.0.0/0
-          ENABLE_SOCKETS: "1"
+          TWS_USERID: ${{ secrets.IBKR_USER }}
+          TWS_PASSWORD: ${{ secrets.IBKR_PASS }}
+          TRADING_MODE: paper
+        ports:
+          - 4001:4001   # TWS-API-Endpunkt
+          - 5000:5000   # Web-Login (Client Portal)
+        options: >-    # Health-Check, damit der Service erst beim Laufen zählt
+          --health-cmd="nc -z localhost 4001"
+          --health-interval=5s
+          --health-timeout=2s
+          --health-retries=12
 
     steps:
-      # 1. Repository auschecken
-      - name: Check out repository
+      # 1️⃣ Repository auschecken
+      - name: Checkout repository
         uses: actions/checkout@v3
 
-      # 2. Python-Umgebung einrichten
-      - name: Set up Python
+      # 2️⃣ Python 3.9 bereitstellen
+      - name: Setup Python 3.9
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
 
-      # 3. Abhängigkeiten installieren
+      # 3️⃣ Abhängigkeiten installieren
       - name: Install dependencies
         run: |
-          pip install requests pandas
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install pandas requests ib_insync
 
-      # 4. SP500-Pipeline ausführen (unabhängig vom Gateway)
-      - name: Run SP500 Pipeline
+      # 4️⃣ Warten, bis der IB Gateway Service bereit ist
+      - name: Wait for IB Gateway API
         run: |
-          echo "Starte sp500_pipeline.py"
-          python sp500_pipeline.py
+          echo "Warte auf IB Gateway API auf localhost:4001..."
+          for i in {1..12}; do
+            if nc -z localhost 4001; then
+              echo "✅ IB Gateway API ist erreichbar."
+              exit 0
+            fi
+            sleep 5
+            echo "Noch nicht da, Versuch $i/12..."
+          done
+          echo "❌ IB Gateway API konnte nicht erreicht werden." >&2
+          exit 1
 
-      # 5. Kurzes Delay, bis IB Gateway einsatzbereit ist
-      - name: Wait for IB Gateway
-        run: |
-          echo "Warte auf IB Gateway..."
-          sleep 30
-
-      # 6. SP500 Agent ausführen
-      - name: Run SP500 Agent
+      # 5️⃣ Pipeline ausführen und loggen
+      - name: Run sp500_pipeline
         env:
+          PAV_LOGFILE: sp500_pipeline.log
+        run: |
+          python sp500_pipeline.py 2>&1 | tee sp500_pipeline.log
+
+      # 6️⃣ Trading-Agent ausführen und loggen
+      - name: Run sp500_agent
+        env:
+          PAV_LOGFILE: sp500_agent.log
+          PAV_LOGLEVEL: INFO
           IBKR_USER: ${{ secrets.IBKR_USER }}
           IBKR_PASS: ${{ secrets.IBKR_PASS }}
+          API_HOST: localhost        # verbindet sich zum Service-Container
+          API_PORT: '4001'
           UPRO_CONID: ${{ secrets.UPRO_CONID }}
-          API_HOST: localhost
-          API_PORT: 4001
         run: |
-          echo "Starte sp500_agent.py"
-          python sp500_agent.py
+          python sp500_agent.py 2>&1 | tee sp500_agent.log
+
+      # 7️⃣ Log-Dateien als Artefakt hochladen
+      - name: Upload logs
+        uses: actions/upload-artifact@v3
+        with:
+          name: pav-logs
+          path: |
+            sp500_pipeline.log
+            sp500_agent.log
