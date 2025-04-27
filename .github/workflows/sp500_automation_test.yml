@@ -8,63 +8,63 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Repository auschecken
+      - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Client Portal Gateway starten
+      - name: Start Client Portal Gateway
         run: |
           docker run -d --name ibkr-gateway -p 5000:5000 dradrian/ibportal:latest
-          echo "Warte 30s, bis das Gateway hochgefahren ist..."
+          echo "Warte 30 Sekunden..."
           sleep 30
 
-      - name: Login am Gateway
+      - name: Login to Gateway
         run: |
-          echo "Authentifiziere mit IBKR..."
           curl -k -s -c cookies.txt -X POST https://localhost:5000/v1/api/iserver/auth/login \
-            -H 'Content-Type: application/json' \
+            -H "Content-Type: application/json" \
             -d "{\"user\":\"${{ secrets.USER }}\",\"password\":\"${{ secrets.PASS }}\"}" \
             -o login.json
 
-      - name: Debug: Login-Antwort & Cookies
+      - name: Debug: Login Response & Cookies
         run: |
           echo "== Inhalt login.json =="
           if [ -s login.json ]; then
             cat login.json
           else
-            echo "⚠️ login.json ist leer oder fehlt!"
+            echo "⚠️ login.json ist leer!"
           fi
 
           echo
-          echo "== Dateiliste im Arbeitsverzeichnis =="
+          echo "== Dateien im Arbeitsverzeichnis =="
           ls -la .
 
           echo
-          echo "== Cookies in cookies.txt =="
+          echo "== Inhalt cookies.txt =="
           if [ -s cookies.txt ]; then
             cat cookies.txt
           else
-            echo "⚠️ cookies.txt ist leer oder fehlt!"
+            echo "⚠️ cookies.txt ist leer!"
           fi
 
-      - name: Debug: Auth-Status prüfen
+      - name: Debug: Auth Status
         run: |
-          echo "== Auth-Status vom Gateway =="
+          echo "== Auth-Status =="
           curl -k -s -b cookies.txt https://localhost:5000/v1/api/iserver/auth/status | jq .
 
-      - name: Debug: Container-Logs
+      - name: Debug: Container Logs
         run: |
           echo "== IBKR-Gateway Logs =="
-          docker logs ibkr-gateway || echo "Container existiert nicht oder ist gestoppt!"
+          docker logs ibkr-gateway || echo "Container nicht gefunden oder gestoppt!"
 
-      - name: Konto-Informationen abfragen
+      - name: Fetch Account Data
         run: |
           echo "Hole Kontodaten..."
-          curl -k -s -b cookies.txt https://localhost:5000/v1/api/iserver/account -o account.json
-          echo "Ergebnis:"
+          curl -k -s -b cookies.txt https://localhost:5000/v1/api/iserver/account \
+            -o account.json
+          echo "== account.json =="
           cat account.json
 
-      # Optional: als Artifact speichern
-      #- name: Kontodaten als Artifact hochladen
+      # Optional: als Artifact hochladen
+      #- name: Upload account.json
       #  uses: actions/upload-artifact@v3
       #  with:
       #    name: ibkr-account-data
