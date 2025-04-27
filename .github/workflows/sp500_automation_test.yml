@@ -1,0 +1,38 @@
+name: IBKR Client Portal API Access
+
+# Manuelle Ausführung erlauben
+on:
+  workflow_dispatch:
+
+jobs:
+  fetch-account:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Repository auschecken
+        uses: actions/checkout@v3
+
+      - name: Client Portal Gateway starten
+        run: |
+          # Container im Hintergrund starten und Port freigeben
+          docker run -d --name ibkr-gateway -p 5000:5000 dradrian/ibportal:latest
+          echo "Warte 30s, bis das Gateway hochgefahren ist..."
+          sleep 30  # Zeit zum Initialisieren :contentReference[oaicite:3]{index=3}
+
+      - name: Login am Gateway
+        run: |
+          echo "Authentifiziere mit IBKR..."
+          # POST /auth/login, speichere die Session-Cookies
+          curl -k -s -c cookies.txt -X POST https://localhost:5000/v1/api/iserver/auth/login \
+            -H 'Content-Type: application/json' \
+            -d "{\"user\":\"${{ secrets.USER }}\",\"password\":\"${{ secrets.PASS }}\"}" \
+            -o login.json
+          echo "Login-Response:"
+          cat login.json
+          echo "Status prüfen:"
+          curl -k -s -b cookies.txt https://localhost:5000/v1/api/iserver/auth/status | jq .
+
+      - name: Konto-Informationen abfragen
+        run: |
+          echo "Hole Kontodaten..."
+          curl -k -s -b cookies.txt https://localhost:5000/v1/api/iserver/account | jq .
