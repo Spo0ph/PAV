@@ -23,41 +23,21 @@ jobs:
             -d "{\"user\":\"${{ secrets.USER }}\",\"password\":\"${{ secrets.PASS }}\"}" \
             -o login.json
 
-      - name: Debug Login Response and Cookies
-        run: |
-          echo '== Inhalt login.json =='
-          if [ -s login.json ]; then
-            cat login.json
-          else
-            echo 'login.json ist leer!'
-          fi
-
-          echo
-          echo '== Dateien im Arbeitsverzeichnis =='
-          ls -la .
-
-          echo
-          echo '== Inhalt cookies.txt =='
-          if [ -s cookies.txt ]; then
-            cat cookies.txt
-          else
-            echo 'cookies.txt ist leer!'
-          fi
-
-      - name: Debug Auth Status
-        run: |
-          echo '== Auth-Status =='
-          curl -k -s -b cookies.txt https://localhost:5000/v1/api/iserver/auth/status | jq .
-
-      - name: Debug Container Logs
-        run: |
-          echo '== IBKR-Gateway Logs =='
-          docker logs ibkr-gateway || echo 'Container nicht gefunden oder gestoppt!'
-
       - name: Fetch Account Data
         run: |
-          echo 'Hole Kontodaten...'
           curl -k -s -b cookies.txt https://localhost:5000/v1/api/iserver/account \
             -o account.json
-          echo '== account.json =='
-          cat account.json
+
+      - name: Retrieve Cash Balance and print to log
+        run: |
+          # accountId auslesen
+          ACCOUNT_ID=$(jq -r '.[0].accountId' account.json)
+          echo "Account ID: $ACCOUNT_ID"
+
+          # Ledger holen und Cash-Balance extrahieren
+          BALANCE=$(curl -k -s -b cookies.txt \
+            https://localhost:5000/v1/api/portfolio/$ACCOUNT_ID/ledger \
+            | jq '.USD.cashbalance')
+
+          # Ausgabe in die Logs
+          echo "Cash Balance (USD): $BALANCE"
