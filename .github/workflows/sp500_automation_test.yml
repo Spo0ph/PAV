@@ -8,23 +8,23 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: "Checkout repository"
         uses: actions/checkout@v3
 
-      - name: Start Client Portal Gateway
+      - name: "Start Client Portal Gateway"
         run: |
           docker run -d --name ibkr-gateway -p 5000:5000 dradrian/ibportal:latest
           echo "Warte 30 Sekunden..."
           sleep 30
 
-      - name: Login to Gateway
+      - name: "Login to Gateway"
         run: |
           curl -k -s -c cookies.txt -X POST https://localhost:5000/v1/api/iserver/auth/login \
             -H "Content-Type: application/json" \
             -d "{\"user\":\"${{ secrets.USER }}\",\"password\":\"${{ secrets.PASS }}\"}" \
             -o login.json
 
-      - name: Debug: Login Response & Cookies
+      - name: "Debug: Login Response & Cookies"
         run: |
           echo "== Inhalt login.json =="
           if [ -s login.json ]; then
@@ -45,17 +45,17 @@ jobs:
             echo "⚠️ cookies.txt ist leer!"
           fi
 
-      - name: Debug: Auth Status
+      - name: "Debug: Auth Status"
         run: |
           echo "== Auth-Status =="
           curl -k -s -b cookies.txt https://localhost:5000/v1/api/iserver/auth/status | jq .
 
-      - name: Debug: Container Logs
+      - name: "Debug: Container Logs"
         run: |
           echo "== IBKR-Gateway Logs =="
           docker logs ibkr-gateway || echo "Container nicht gefunden oder gestoppt!"
 
-      - name: Fetch Account Data
+      - name: "Fetch Account Data"
         run: |
           echo "Hole Kontodaten..."
           curl -k -s -b cookies.txt https://localhost:5000/v1/api/iserver/account \
@@ -64,7 +64,7 @@ jobs:
           cat account.json
 
       # Optional: als Artifact hochladen
-      #- name: Upload account.json
+      #- name: "Upload account.json"
       #  uses: actions/upload-artifact@v3
       #  with:
       #    name: ibkr-account-data
