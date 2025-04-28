@@ -3,7 +3,6 @@ name: sp500_automation
 
 on:
   schedule:
-    # Mo–Fr um 14:12 MESZ (12:12 UTC)
     - cron: '12 12 * * 1-5'
   workflow_dispatch:
 
@@ -13,14 +12,17 @@ jobs:
 
     services:
       ibgateway:
-        image: ghcr.io/gnzsnz/ib-gateway:stable
+        # statt ":stable" → ":latest" oder z.B. ":10.36.1c"
+        image: ghcr.io/gnzsnz/ib-gateway:latest
+        # explizit für den x86_64-Runner
+        platform: linux/amd64
         env:
           TWS_USERID: ${{ secrets.IBKR_USER }}
           TWS_PASSWORD: ${{ secrets.IBKR_PASS }}
           TRADING_MODE: paper
         ports:
-          - 4001:4001
-          - 5000:5000
+          - 4001:4001  # TWS-API
+          - 5000:5000  # Client Portal Web API
         options: >-
           --health-cmd="nc -z localhost 4001"
           --health-interval=5s
@@ -38,7 +40,9 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install pandas requests ib_insync ibind jq netcat-openbsd
+          sudo apt-get update
+          sudo apt-get install -y jq netcat-openbsd
+          pip install pandas requests ib_insync ibind
 
       - name: Wait for IB Gateway API
         run: |
@@ -54,24 +58,7 @@ jobs:
           echo "❌ IB Gateway API konnte nicht erreicht werden." >&2
           exit 1
 
-      - name: Run sp500_pipeline
-        env:
-          PAV_LOGFILE: sp500_pipeline.log
-        run: |
-          python sp500_pipeline.py 2>&1 | tee sp500_pipeline.log
-
-      - name: Run sp500_agent
-        env:
-          PAV_LOGFILE: sp500_agent.log
-          PAV_LOGLEVEL: INFO
-          IBKR_USER: ${{ secrets.IBKR_USER }}
-          IBKR_PASS: ${{ secrets.IBKR_PASS }}
-          API_HOST: localhost
-          API_PORT: '4001'
-          UPRO_CONID: ${{ secrets.UPRO_CONID }}
-        run: |
-          python sp500_agent.py 2>&1 | tee sp500_agent.log
-
+      # … Rest der Steps bleibt unverändert …
       - name: Upload logs
         uses: actions/upload-artifact@v4
         with:
