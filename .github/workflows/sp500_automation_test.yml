@@ -1,43 +1,35 @@
-name: IBKR Client Portal API Access
+name: IBKR Cash Balance
 
 on:
   workflow_dispatch:
 
 jobs:
-  fetch-account:
+  print-balance:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout repo
         uses: actions/checkout@v3
 
-      - name: Start Client Portal Gateway
+      - name: Start Gateway
         run: |
-          docker run -d --name ibkr-gateway -p 5000:5000 dradrian/ibportal:latest
-          echo 'Warte 30 Sekunden...'
-          sleep 30
+          # Container mit Client Portal API starten
+          docker run -d --name ibkr -p 5000:5000 dradrian/ibportal:latest
+          sleep 30  # kurz warten, bis das Gateway bereit ist
 
-      - name: Login to Gateway
+      - name: Login
         run: |
-          curl -k -s -c cookies.txt -X POST https://localhost:5000/v1/api/iserver/auth/login \
+          # User/Pass an Gateway senden, Cookies speichern
+          curl -k -s -c cookies.txt \
+            -X POST https://localhost:5000/v1/api/iserver/auth/login \
             -H 'Content-Type: application/json' \
-            -d "{\"user\":\"${{ secrets.USER }}\",\"password\":\"${{ secrets.PASS }}\"}" \
-            -o login.json
+            -d "{\"user\":\"${{ secrets.USER }}\",\"password\":\"${{ secrets.PASS }}\"}"
 
-      - name: Fetch Account Data
+      - name: Print Cash Balance
         run: |
-          curl -k -s -b cookies.txt https://localhost:5000/v1/api/iserver/account \
-            -o account.json
-
-      - name: Retrieve Cash Balance and print to log
-        run: |
-          # accountId auslesen
-          ACCOUNT_ID=$(jq -r '.[0].accountId' account.json)
-          echo "Account ID: $ACCOUNT_ID"
-
-          # Ledger holen und Cash-Balance extrahieren
-          BALANCE=$(curl -k -s -b cookies.txt \
+          # accountId aus dem Account-Endpoint holen
+          ACCOUNT_ID=$(curl -k -s -b cookies.txt https://localhost:5000/v1/api/iserver/account \
+            | jq -r '.[0].accountId')
+          # Ledger abrufen und USD-Cash-Balance ausgeben
+          curl -k -s -b cookies.txt \
             https://localhost:5000/v1/api/portfolio/$ACCOUNT_ID/ledger \
-            | jq '.USD.cashbalance')
-
-          # Ausgabe in die Logs
-          echo "Cash Balance (USD): $BALANCE"
+            | jq '.USD.cashbalance | "Cash Balance (USD): \(. )"'
