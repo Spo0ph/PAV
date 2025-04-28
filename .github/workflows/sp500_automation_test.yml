@@ -1,32 +1,54 @@
-name: Print IBKR Cash Balance
+name: IBKR Paper Trading Cash Balance
 
 on:
   workflow_dispatch:
 
 jobs:
-  print-balance:
+  print-paper-balance:
     runs-on: ubuntu-latest
     steps:
-      - name: Start Client Portal Gateway
-        run: |
-          # Gateway in Docker starten (Port 5000)
-          docker run -d --name ibkr-gateway -p 5000:5000 dradrian/ibportal:latest
-          sleep 30  # kurz warten, bis das Gateway bereit ist
+      - name: Checkout repo
+        uses: actions/checkout@v3
 
-      - name: Login
+      - name: Start Gateway
         run: |
-          # Brokerage-Session starten (POST /iserver/auth/login)
-          curl -k -s -c cookies.txt -X POST https://localhost:5000/v1/api/iserver/auth/login \
+          # Gateway-Container starten
+          docker run -d --name ibkr-gateway -p 5000:5000 dradrian/ibportal:latest
+          sleep 30  # warten bis der Service bereit ist
+
+      - name: Validate SSO session
+        run: |
+          # GET /portal/sso/validate (SSO-Session muss gültig sein)
+          STATUS=$(curl -k -s -o /dev/null -w '%{http_code}' \
+            https://localhost:5000/v1/portal/sso/validate)
+          if [ "$STATUS" -ne 200 ]; then
+            echo "SSO validation failed with HTTP $STATUS"
+            exit 1
+          fi
+
+      - name: Login (Brokerage-Session)
+        run: |
+          # POST /iserver/auth/login
+          curl -k -s -c cookies.txt -X POST \
+            https://localhost:5000/v1/api/iserver/auth/login \
             -H 'Content-Type: application/json' \
             -d "{\"user\":\"${{ secrets.USER }}\",\"password\":\"${{ secrets.PASS }}\"}"
 
-      - name: Print Cash Balance
+      - name: Check auth status
         run: |
-          # 1) accountId holen (GET /iserver/account)
-          ACCOUNT_ID=$(curl -k -s -b cookies.txt https://localhost:5000/v1/api/iserver/account \
-            | jq -r '.[0].accountId')
+          # GET /iserver/auth/status
+          curl -k -s -b cookies.txt \
+            https://localhost:5000/v1/api/iserver/auth/status | jq .
 
-          # 2) Ledger abrufen und USD-Cash-Balance drucken (GET /portfolio/{accountId}/ledger)
+      - name: Print Paper Trading Cash Balance
+        run: |
+          # GET /iserver/account → accountId für Paper Trading extrahieren
+          ACCOUNT_ID=$(curl -k -s -b cookies.txt \
+            https://localhost:5000/v1/api/iserver/account \
+            | jq -r '.[] | select(.accountDesc | test("paper";"i")) | .accountId')
+          echo "Account ID: $ACCOUNT_ID"
+
+          # GET /portfolio/{accountId}/ledger → USD.cashbalance ausgeben
           curl -k -s -b cookies.txt \
             https://localhost:5000/v1/api/portfolio/$ACCOUNT_ID/ledger \
-          | jq '.USD.cashbalance | "Cash Balance (USD): \(. )"'
+          | jq -r '.USD.cashbalance | "Paper Trading Cash Balance (USD): \(. )"'
