@@ -1,14 +1,16 @@
+# sp500_agent.py
 import os
 import logging
 from logging.handlers import RotatingFileHandler
+
 import pandas as pd
-import requests
+from ibind import IbkrClient
+from ibind.client.ibkr_utils import Answers  # für Order-Responses
 import time
 
 # --- Logging-Konfiguration ---
 LOG_FILE = os.getenv("PAV_LOGFILE", "sp500_agent.log")
 LOG_LEVEL = os.getenv("PAV_LOGLEVEL", "INFO").upper()
-
 logger = logging.getLogger("pav")
 logger.setLevel(LOG_LEVEL)
 
@@ -22,118 +24,96 @@ formatter = logging.Formatter(
 file_handler.setFormatter(formatter)
 logger.addHandler(file_handler)
 
-# Optional: Ausgabe auch in die Konsole
 console_handler = logging.StreamHandler()
 console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 # ------------------------------
 
 # Umgebungsvariablen
-IBKR_USER   = os.getenv("IBKR_USER")
-IBKR_PASS   = os.getenv("IBKR_PASS")
-API_HOST    = os.getenv("API_HOST", "localhost")
-API_PORT    = os.getenv("API_PORT", "4001")
-UPRO_CONID  = os.getenv("UPRO_CONID")
-API_URL     = f"https://{API_HOST}:{API_PORT}"
-
-
-def authenticate():
-    """
-    Authentifiziert beim IBKR Client-Portal und gibt eine Session zurück.
-    """
-    session = requests.Session()
-    login_payload = {"user": IBKR_USER, "password": IBKR_PASS}
-    url = f"{API_URL}/api/v1/portal/login"
-    logger.info("Sende Login-Anfrage an IBKR Client Portal")
-    resp = session.post(url, json=login_payload, verify=False)
-    resp.raise_for_status()
-    logger.info("Erfolgreich authentifiziert")
-    return session
-
-
-def get_account_info(session):
-    """
-    Liest Kontostand und bestehende UPRO-Position aus.
-    Gibt (cash, position_qty) zurück.
-    """
-    # Kontostand abfragen
-    url_cash = f"{API_URL}/api/v1/portfolio/cash"
-    resp_cash = session.get(url_cash, verify=False)
-    resp_cash.raise_for_status()
-    cash = resp_cash.json().get("cashBalance", 0.0)
-    logger.info(f"Kontostand: {cash:.2f} USD")
-
-    # Positionen abfragen
-    url_pos = f"{API_URL}/api/v1/portfolio/positions"
-    resp_pos = session.get(url_pos, verify=False)
-    resp_pos.raise_for_status()
-    positions = resp_pos.json()
-    pos_qty = 0
-    for pos in positions:
-        if str(pos.get("conid")) == UPRO_CONID:
-            pos_qty = pos.get("position", 0)
-            break
-    logger.info(f"UPRO-Position: {pos_qty} Anteile")
-    return cash, pos_qty
-
-
-def place_order(session, action, qty):
-    """
-    Führt eine Marktorder (BUY/SELL) für UPRO aus.
-    """
-    order = {
-        "conid": int(UPRO_CONID),
-        "secType": "ETF",
-        "orderType": "MKT",
-        "side": action,
-        "quantity": qty,
-    }
-    url_order = f"{API_URL}/api/v1/trade"
-    logger.info(f"Sende Order: {action} {qty} UPRO-Anteile")
-    resp = session.post(url_order, json=order, verify=False)
-    resp.raise_for_status()
-    logger.info("Order erfolgreich platziert")
-    return resp.json()
-
+IBKR_USER = os.getenv("IBKR_USER")
+IBKR_PASS = os.getenv("IBKR_PASS")
+API_HOST = os.getenv("API_HOST", "localhost")
+API_PORT = os.getenv("API_PORT", "4001")
+UPRO_CONID = os.getenv("UPRO_CONID")
 
 def main():
     logger.info("Starte sp500_agent")
+
     try:
         # 1) Signale laden
         df = pd.read_csv("sp500_signals.csv", index_col=0, parse_dates=True)
         last_signal = df.iloc[-1]["SMA_DD_Signal"]
-        logger.info(f"Letztes Signal: {last_signal}")
-
-        # Aktuellen Preis ermitteln (optional, ersatzweise über CSV-Spalte 'Close')
         price = float(df.iloc[-1]["Close"])
-        logger.debug(f"Aktueller UPRO-Kurs: {price:.2f}")
+        logger.info(f"Letztes Signal: {last_signal}, Kurs: {price:.2f} USD")
 
-        # 2) Authentifizieren
-        session = authenticate()
-        time.sleep(1)  # kurz warten, bis Session bereit
+        # 2) IBKR-Client initialisieren & authentifizieren
+        client = IbkrClient(
+            host=API_HOST,
+            port=API_PORT,
+            username=IBKR_USER,
+            password=IBKR_PASS
+        )
+        client.check_health()
+        client.tickle()
 
-        # 3) Konto-Info
-        cash, pos_qty = get_account_info(session)
+        # 3) Paper-Konto ermitteln
+        accounts = client.portfolio_accounts().data.get("accounts", [])
+        paper_account = None
+        for acct in accounts:
+            summary = client.account_summary(acct).data
+            if summary.get("accountType", "").lower() == "paper":
+                paper_account = acct
+                break
+        if not paper_account:
+            raise RuntimeError("Kein PAPER-Konto gefunden")
+        logger.info(f"Verwende PAPER-Konto: {paper_account}")
 
-        # 4) Order-Entscheidung
+        # 4) Portfolio-Ledger abfragen
+        ledger = client.get_ledger(paper_account).data
+        cash = ledger.get("USD", {}).get("cashBalance", 0.0)
+        logger.info(f"Cash Balance: {cash:.2f} USD")
+
+        positions = ledger.get("positions", [])
+        pos_qty = next(
+            (p["position"] for p in positions if str(p.get("conid")) == UPRO_CONID),
+            0
+        )
+        logger.info(f"UPRO Position: {pos_qty} Anteile")
+
+        # 5) Handelslogik
         if last_signal == "BUY" and cash > price:
             qty = int(cash // price)
             if qty > 0:
                 logger.info(f"Kaufe {qty} Anteile UPRO")
-                place_order(session, "BUY", qty)
+                order_req = {
+                    "conid": int(UPRO_CONID),
+                    "secType": "ETF",
+                    "orderType": "MKT",
+                    "side": "BUY",
+                    "quantity": qty
+                }
+                # leeres Answers-Array, falls keine Fragen auftreten
+                client.place_order(order_req, answers=[], account_id=paper_account)
             else:
                 logger.info("Nicht genügend Cash für eine Kauforder")
         elif last_signal == "SELL" and pos_qty > 0:
             logger.info(f"Verkaufe alle {pos_qty} Anteile UPRO")
-            place_order(session, "SELL", pos_qty)
+            order_req = {
+                "conid": int(UPRO_CONID),
+                "secType": "ETF",
+                "orderType": "MKT",
+                "side": "SELL",
+                "quantity": pos_qty
+            }
+            client.place_order(order_req, answers=[], account_id=paper_account)
         else:
             logger.info("Keine Handelsaktion erforderlich")
 
         logger.info("sp500_agent erfolgreich abgeschlossen")
+
     except Exception:
         logger.exception("Fehler im sp500_agent")
         raise
-
 
 if __name__ == "__main__":
     main()

@@ -1,57 +1,81 @@
-name: IBKR Paper Trading Cash Balance
+# .github/workflows/sp500_automation.yml
+name: sp500_automation
 
 on:
+  schedule:
+    # Mo–Fr um 14:12 MESZ (12:12 UTC)
+    - cron: '12 12 * * 1-5'
   workflow_dispatch:
 
 jobs:
-  print-paper-balance:
+  build-and-trade:
     runs-on: ubuntu-latest
 
+    services:
+      ibgateway:
+        image: ghcr.io/gnzsnz/ib-gateway:stable
+        env:
+          TWS_USERID: ${{ secrets.IBKR_USER }}
+          TWS_PASSWORD: ${{ secrets.IBKR_PASS }}
+          TRADING_MODE: paper
+        ports:
+          - 4001:4001  # TWS-API-Endpunkt
+          - 5000:5000  # Web-Login (Client Portal)
+        options: >-
+          --health-cmd="nc -z localhost 4001"
+          --health-interval=5s
+          --health-timeout=2s
+          --health-retries=12
+
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Start IBeam Gateway
-        run: |
-          # Wir holen uns das offizielle IBeam-Image
-          docker pull voyz/ibeam:latest
+      - name: Setup Python 3.9
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
 
-          # Starte den Container mit Credentials aus GitHub Secrets
-          docker run -d --name ibgw \
-            -e IBEAM_ACCOUNT="${{ secrets.IBEAM_ACCOUNT }}" \
-            -e IBEAM_PASSWORD="${{ secrets.IBEAM_PASSWORD }}" \
-            -p 5000:5000 voyz/ibeam:latest
-            
-      - name: Check IBGW Container & Logs
+      - name: Install dependencies
         run: |
-          echo "Container-Status:"
-          docker ps --filter "name=ibgw"
-          echo "--- Logs (letzte 20 Zeilen) ---"
-          docker logs --tail 20 ibgw || true
+          pip install pandas requests ib_insync ibind
 
-      - name: Wait for Authentication
+      - name: Wait for IB Gateway API
         run: |
-          # Polling bis auth="SUCCESS" zurückkommt
-          for i in {1..30}; do
-            resp=$(curl -s -k http://localhost:5000/v1/api/iserver/auth/status)
-            echo "Try $i: $resp"
-            if echo "$resp" | grep -q '"auth":"SUCCESS"'; then
-              echo "✅ Authenticated"
+          echo "Warte auf IB Gateway API auf localhost:4001..."
+          for i in {1..12}; do
+            if nc -z localhost 4001; then
+              echo "✅ IB Gateway API ist erreichbar."
               exit 0
             fi
             sleep 5
+            echo "Noch nicht da, Versuch $i/12..."
           done
-          echo "❌ Authentication failed" >&2
+          echo "❌ IB Gateway API konnte nicht erreicht werden." >&2
           exit 1
 
-      - name: Print Paper Trading Cash Balance
+      - name: Run sp500_pipeline
+        env:
+          PAV_LOGFILE: sp500_pipeline.log
         run: |
-          # 1) Paper Trading Account ID ermitteln
-          ACCOUNT_ID=$(curl -s -k http://localhost:5000/v1/api/iserver/account \
-            | jq -r '.[] | select(.accountDesc|test("paper";"i")) | .accountId')
-          echo "Paper Trading Account ID: $ACCOUNT_ID"
+          python sp500_pipeline.py 2>&1 | tee sp500_pipeline.log
 
-          # 2) Ledger abrufen und USD.cashbalance ausgeben
-          BALANCE=$(curl -s -k http://localhost:5000/v1/api/portfolio/$ACCOUNT_ID/ledger \
-            | jq -r '.USD.cashbalance')
-          echo "Paper Trading Cash Balance (USD): $BALANCE"
+      - name: Run sp500_agent
+        env:
+          PAV_LOGFILE: sp500_agent.log
+          PAV_LOGLEVEL: INFO
+          IBKR_USER: ${{ secrets.IBKR_USER }}
+          IBKR_PASS: ${{ secrets.IBKR_PASS }}
+          API_HOST: localhost
+          API_PORT: '4001'
+          UPRO_CONID: ${{ secrets.UPRO_CONID }}
+        run: |
+          python sp500_agent.py 2>&1 | tee sp500_agent.log
+
+      - name: Upload logs
+        uses: actions/upload-artifact@v3
+        with:
+          name: pav-logs
+          path: |
+            sp500_pipeline.log
+            sp500_agent.log
