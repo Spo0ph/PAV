@@ -6,40 +6,44 @@ on:
 jobs:
   print-paper-balance:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
 
-      - name: Start Gateway
+      - name: Start IBeam Gateway
         run: |
-          # Container mit Client Portal API starten
-          docker run -d --name ibkr-gateway -p 5000:5000 dradrian/ibportal:latest
-          sleep 30  # warte bis das Gateway bereit ist
+          # Wir holen uns das offizielle IBeam-Image
+          docker pull voyz/ibeam:latest
 
-      - name: Login (Brokerage-Session)
+          # Starte den Container mit Credentials aus GitHub Secrets
+          docker run -d --name ibgw \
+            -e IBEAM_ACCOUNT="${{ secrets.IBEAM_ACCOUNT }}" \
+            -e IBEAM_PASSWORD="${{ secrets.IBEAM_PASSWORD }}" \
+            -p 5000:5000 voyz/ibeam:latest
+      - name: Wait for Authentication
         run: |
-          # POST /iserver/auth/login
-          curl -k -s -c cookies.txt -X POST \
-            https://localhost:5000/v1/api/iserver/auth/login \
-            -H 'Content-Type: application/json' \
-            -d "{\"user\":\"${{ secrets.USER }}\",\"password\":\"${{ secrets.PASS }}\"}"
-
-      - name: Check auth status
-        run: |
-          # GET /iserver/auth/status
-          echo "Auth-Status:"
-          curl -k -s -b cookies.txt \
-            https://localhost:5000/v1/api/iserver/auth/status | jq .
+          # Polling bis auth="SUCCESS" zurückkommt
+          for i in {1..30}; do
+            resp=$(curl -s -k http://localhost:5000/v1/api/iserver/auth/status)
+            echo "Try $i: $resp"
+            if echo "$resp" | grep -q '"auth":"SUCCESS"'; then
+              echo "✅ Authenticated"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "❌ Authentication failed" >&2
+          exit 1
 
       - name: Print Paper Trading Cash Balance
         run: |
-          # 1) Account-Liste abrufen (GET /iserver/account)
-          ACCOUNT_ID=$(curl -k -s -b cookies.txt \
-            https://localhost:5000/v1/api/iserver/account \
+          # 1) Paper Trading Account ID ermitteln
+          ACCOUNT_ID=$(curl -s -k http://localhost:5000/v1/api/iserver/account \
             | jq -r '.[] | select(.accountDesc|test("paper";"i")) | .accountId')
           echo "Paper Trading Account ID: $ACCOUNT_ID"
 
-          # 2) Ledger abrufen und USD.cashbalance ausgeben (GET /portfolio/{id}/ledger)
-          curl -k -s -b cookies.txt \
-            https://localhost:5000/v1/api/portfolio/$ACCOUNT_ID/ledger \
-          | jq -r '.USD.cashbalance | "Paper Trading Cash Balance (USD): \(. )"'
+          # 2) Ledger abrufen und USD.cashbalance ausgeben
+          BALANCE=$(curl -s -k http://localhost:5000/v1/api/portfolio/$ACCOUNT_ID/ledger \
+            | jq -r '.USD.cashbalance')
+          echo "Paper Trading Cash Balance (USD): $BALANCE"
