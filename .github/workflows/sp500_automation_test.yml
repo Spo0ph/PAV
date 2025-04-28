@@ -15,7 +15,6 @@ jobs:
         # statt ":stable" → ":latest" oder z.B. ":10.36.1c"
         image: ghcr.io/gnzsnz/ib-gateway:latest
         # explizit für den x86_64-Runner
-        platform: linux/amd64
         env:
           TWS_USERID: ${{ secrets.IBKR_USER }}
           TWS_PASSWORD: ${{ secrets.IBKR_PASS }}
