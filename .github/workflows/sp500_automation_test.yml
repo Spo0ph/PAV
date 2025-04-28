@@ -19,8 +19,8 @@ jobs:
           TWS_PASSWORD: ${{ secrets.IBKR_PASS }}
           TRADING_MODE: paper
         ports:
-          - 4001:4001  # TWS-API-Endpunkt
-          - 5000:5000  # Web-Login (Client Portal)
+          - 4001:4001
+          - 5000:5000
         options: >-
           --health-cmd="nc -z localhost 4001"
           --health-interval=5s
@@ -38,7 +38,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install pandas requests ib_insync ibind
+          pip install pandas requests ib_insync ibind jq netcat-openbsd
 
       - name: Wait for IB Gateway API
         run: |
