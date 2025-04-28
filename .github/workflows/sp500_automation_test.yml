@@ -21,6 +21,14 @@ jobs:
             -e IBEAM_ACCOUNT="${{ secrets.IBEAM_ACCOUNT }}" \
             -e IBEAM_PASSWORD="${{ secrets.IBEAM_PASSWORD }}" \
             -p 5000:5000 voyz/ibeam:latest
+            
+      - name: Check IBGW Container & Logs
+        run: |
+          echo "Container-Status:"
+          docker ps --filter "name=ibgw"
+          echo "--- Logs (letzte 20 Zeilen) ---"
+          docker logs --tail 20 ibgw || true
+
       - name: Wait for Authentication
         run: |
           # Polling bis auth="SUCCESS" zurückkommt
