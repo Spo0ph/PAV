@@ -73,7 +73,7 @@ jobs:
           python sp500_agent.py 2>&1 | tee sp500_agent.log
 
       - name: Upload logs
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: pav-logs
           path: |
