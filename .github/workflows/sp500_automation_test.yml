@@ -1,4 +1,4 @@
-name: IBKR Cash Balance
+name: Print IBKR Cash Balance
 
 on:
   workflow_dispatch:
@@ -7,29 +7,26 @@ jobs:
   print-balance:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
-
-      - name: Start Gateway
+      - name: Start Client Portal Gateway
         run: |
-          # Container mit Client Portal API starten
-          docker run -d --name ibkr -p 5000:5000 dradrian/ibportal:latest
+          # Gateway in Docker starten (Port 5000)
+          docker run -d --name ibkr-gateway -p 5000:5000 dradrian/ibportal:latest
           sleep 30  # kurz warten, bis das Gateway bereit ist
 
       - name: Login
         run: |
-          # User/Pass an Gateway senden, Cookies speichern
-          curl -k -s -c cookies.txt \
-            -X POST https://localhost:5000/v1/api/iserver/auth/login \
+          # Brokerage-Session starten (POST /iserver/auth/login)
+          curl -k -s -c cookies.txt -X POST https://localhost:5000/v1/api/iserver/auth/login \
             -H 'Content-Type: application/json' \
             -d "{\"user\":\"${{ secrets.USER }}\",\"password\":\"${{ secrets.PASS }}\"}"
 
       - name: Print Cash Balance
         run: |
-          # accountId aus dem Account-Endpoint holen
+          # 1) accountId holen (GET /iserver/account)
           ACCOUNT_ID=$(curl -k -s -b cookies.txt https://localhost:5000/v1/api/iserver/account \
             | jq -r '.[0].accountId')
-          # Ledger abrufen und USD-Cash-Balance ausgeben
+
+          # 2) Ledger abrufen und USD-Cash-Balance drucken (GET /portfolio/{accountId}/ledger)
           curl -k -s -b cookies.txt \
             https://localhost:5000/v1/api/portfolio/$ACCOUNT_ID/ledger \
-            | jq '.USD.cashbalance | "Cash Balance (USD): \(. )"'
+          | jq '.USD.cashbalance | "Cash Balance (USD): \(. )"'
