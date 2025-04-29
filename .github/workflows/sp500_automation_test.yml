@@ -1,3 +1,7 @@
+# .github/workflows/sp500_automation_test.yml
+on:
+  workflow_dispatch:
+
 jobs:
   build-and-trade:
     runs-on: ubuntu-latest
@@ -41,27 +45,27 @@ jobs:
           COOKIE=cookies.txt
           set -eux
 
-          # 1) init CSRF & cookies
+          # 1) Init CSRF & Cookies
           curl -fsSL "$BASE/auth/authorize" -c "$COOKIE" >/dev/null
 
-          # 2) login
+          # 2) Login
           curl -fsSL -X POST "$BASE/auth/login" \
             -H 'Content-Type: application/json' \
             -b "$COOKIE" -c "$COOKIE" \
             -d "{\"user\":\"${{ secrets.IBEAM_ACCOUNT }}\",\"password\":\"${{ secrets.IBEAM_PASSWORD }}\"}"
 
-          # 3) get apiToken
+          # 3) Validate → API token holen
           API_TOKEN=$(curl -fsSL "$BASE/auth/validate" -b "$COOKIE" | jq -r .apiToken)
           echo "Got API_TOKEN: $API_TOKEN"
           echo "API_TOKEN=$API_TOKEN" >> $GITHUB_ENV
 
-          # 4) poll until auth==SUCCESS
+          # 4) Poll until auth=="SUCCESS"
           until curl -fsSL -H "Authorization: Bearer $API_TOKEN" -b "$COOKIE" \
             "$BASE/auth/status" | jq -e '.auth=="SUCCESS"' >/dev/null; do
             echo "Waiting for auth…"
             sleep 5
           done
-          echo "✅ Authenticated"
+          echo "✅ Authentifiziert"
 
       - name: Print Paper Trading Cash Balance
         run: |
@@ -69,9 +73,10 @@ jobs:
           COOKIE=cookies.txt
           set -eux
 
-          # Paper-Konto ermitteln
+          # Paper-Account ermitteln
           ACCOUNT_ID=$(curl -fsSL -H "Authorization: Bearer $API_TOKEN" -b "$COOKIE" \
-            "$BASE/account" | jq -r '.[] | select(.accountType=="PAPER") | .accountId')
+            "$BASE/account" \
+            | jq -r '.[] | select(.accountType=="PAPER") | .accountId')
           echo "Using PAPER account: $ACCOUNT_ID"
 
           # Ledger & Cash Balance
@@ -79,3 +84,10 @@ jobs:
             "$BASE/portfolio/$ACCOUNT_ID/ledger" \
             | jq -r '.USD.cashbalance')
           echo "Paper Trading Cash Balance (USD): $BALANCE"
+
+      - name: Upload logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: pav-logs
+          path: |
+            sp500_agent.log
