@@ -24,63 +24,72 @@ jobs:
             -e IBEAM_PASSWORD="${{ secrets.IBEAM_PASSWORD }}" \
             -p 5000:5000 voyz/ibeam:latest
 
-      - name: Wait for IBeam to be ready
+      - name: Wait for IBeam to be up (service listening)
         run: |
           for i in {1..30}; do
-            AUTH=$(curl -s http://localhost:5000/v1/api/iserver/auth/status \
-              | jq -r .auth || echo ERROR)
+            nc -z localhost 5000 && echo "Port 5000 open" && exit 0
+            echo "Waiting for port 5000… ($i/30)"
+            sleep 5
+          done
+          echo "❌ IBeam service did not start" >&2
+          exit 1
+
+      - name: Wait for IBeam auth endpoint
+        run: |
+          for i in {1..30}; do
+            AUTH=$(curl -s -k https://localhost:5000/v1/api/iserver/auth/status \
+              | jq -r .auth || echo "")
             echo "Try $i: auth=$AUTH"
-            if [ "$AUTH" = "SUCCESS" ]; then
-              echo "✅ IBeam ready"
+            if [ "$AUTH" = "UNKNOWN" ] || [ "$AUTH" = "SUCCESS" ]; then
+              echo "✅ auth endpoint ready"
               exit 0
             fi
             sleep 5
           done
-          echo "❌ IBeam did not become ready in time" >&2
+          echo "❌ auth endpoint not responding correctly" >&2
           exit 1
 
       - name: Authenticate CPAPI headless
         run: |
-          BASE=http://localhost:5000/v1/api/iserver
+          BASE=https://localhost:5000/v1/api/iserver
           COOKIE=cookies.txt
           set -eux
 
           # 1) Init CSRF & Cookies
-          curl -fsSL "$BASE/auth/authorize" -c "$COOKIE" >/dev/null
+          curl -fsSL "$BASE/auth/authorize" -k -c "$COOKIE" >/dev/null
 
           # 2) Login
-          curl -fsSL -X POST "$BASE/auth/login" \
+          curl -fsSL -X POST "$BASE/auth/login" -k \
             -H 'Content-Type: application/json' \
             -b "$COOKIE" -c "$COOKIE" \
             -d "{\"user\":\"${{ secrets.IBEAM_ACCOUNT }}\",\"password\":\"${{ secrets.IBEAM_PASSWORD }}\"}"
 
           # 3) Validate → API token holen
-          API_TOKEN=$(curl -fsSL "$BASE/auth/validate" -b "$COOKIE" | jq -r .apiToken)
+          API_TOKEN=$(curl -fsSL "$BASE/auth/validate" -k -b "$COOKIE" \
+            | jq -r .apiToken)
           echo "Got API_TOKEN: $API_TOKEN"
           echo "API_TOKEN=$API_TOKEN" >> $GITHUB_ENV
 
           # 4) Poll until auth=="SUCCESS"
-          until curl -fsSL -H "Authorization: Bearer $API_TOKEN" -b "$COOKIE" \
+          until curl -fsSL -H "Authorization: Bearer $API_TOKEN" -k -b "$COOKIE" \
             "$BASE/auth/status" | jq -e '.auth=="SUCCESS"' >/dev/null; do
             echo "Waiting for auth…"
             sleep 5
           done
-          echo "✅ Authentifiziert"
+          echo "✅ Authenticated"
 
       - name: Print Paper Trading Cash Balance
         run: |
-          BASE=http://localhost:5000/v1/api/iserver
+          BASE=https://localhost:5000/v1/api/iserver
           COOKIE=cookies.txt
           set -eux
 
-          # Paper-Account ermitteln
-          ACCOUNT_ID=$(curl -fsSL -H "Authorization: Bearer $API_TOKEN" -b "$COOKIE" \
+          ACCOUNT_ID=$(curl -fsSL -H "Authorization: Bearer $API_TOKEN" -k -b "$COOKIE" \
             "$BASE/account" \
             | jq -r '.[] | select(.accountType=="PAPER") | .accountId')
           echo "Using PAPER account: $ACCOUNT_ID"
 
-          # Ledger & Cash Balance
-          BALANCE=$(curl -fsSL -H "Authorization: Bearer $API_TOKEN" -b "$COOKIE" \
+          BALANCE=$(curl -fsSL -H "Authorization: Bearer $API_TOKEN" -k -b "$COOKIE" \
             "$BASE/portfolio/$ACCOUNT_ID/ledger" \
             | jq -r '.USD.cashbalance')
           echo "Paper Trading Cash Balance (USD): $BALANCE"
