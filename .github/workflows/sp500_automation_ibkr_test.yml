@@ -1,0 +1,22 @@
+name: IBKR Paper Account Check
+
+on:
+  schedule:
+    - cron: "0 8 * * 1-5"  # Mo-Fr 08:00 UTC
+  workflow_dispatch:
+
+jobs:
+  check-balance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run balance check
+        env:
+          CONSUMER_KEY: ${{ secrets.CONSUMER_KEY }}
+          ACCESS_TOKEN: ${{ secrets.ACCESS_TOKEN }}
+          ACCESS_TOKEN_SECRET: ${{ secrets.ACCESS_TOKEN_SECRET }}
+        run: python3 trade.py
