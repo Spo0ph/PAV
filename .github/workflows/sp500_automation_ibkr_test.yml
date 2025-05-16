@@ -1,22 +1,37 @@
-name: IBKR Paper Account Check
+name: IB Gateway 2FA-Login
 
 on:
-  schedule:
-    - cron: "0 8 * * 1-5"  # Mo-Fr 08:00 UTC
+  # Manuell triggerbar über den Button in Actions
   workflow_dispatch:
+  # Optional: täglich um 08:00 Uhr (UTC) ausführen
+  schedule:
+    - cron: '0 8 * * *'
 
 jobs:
-  check-balance:
+  login:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout (nur, um Actions-Umgebung zu initialisieren)
+        uses: actions/checkout@v4
 
-      - name: Install dependencies
-        run: pip install requests requests_oauthlib
+      - name: SSH-Agent starten
+        uses: webfactory/ssh-agent@v0.8.1
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
 
-      - name: Run balance check
-        env:
-          CONSUMER_KEY: ${{ secrets.CONSUMER_KEY }}
-          ACCESS_TOKEN: ${{ secrets.ACCESS_TOKEN }}
-          ACCESS_TOKEN_SECRET: ${{ secrets.ACCESS_TOKEN_SECRET }}
-        run: python3 ibkr_test.py
+      - name: Füge Known Hosts hinzu
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Trigger IBKR-Gateway-Login auf dem Server
+        run: |
+          ssh -o StrictHostKeyChecking=yes ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << 'EOF'
+            # Lade env-File für Login-Credentials und DISPLAY
+            source /root/.ibgateway.env
+
+            # Starte Login-Skript (venv-Python)
+            /opt/ibgateway-venv/bin/python /root/login_gateway.py
+          EOF
