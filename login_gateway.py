@@ -39,7 +39,7 @@ def main():
     # Warte bis das Login-Fenster erschienen ist
     time.sleep(10)
     # Code erzeugen und eintippen
-    totp = pyotp.TOTP(SECRET).now()
+    totp = pyotp.TOTP(os.getenv('IBKR_TOTP_SECRET')).now()
     send_keystrokes(totp)
     # Optional: warte bis Login durch ist
     proc.wait()
