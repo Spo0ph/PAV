@@ -1,0 +1,74 @@
+#!/opt/ibgateway-venv/bin/python
+import os
+import time
+import subprocess
+import pyotp
+
+# Lade Umgebungsvariablen aus Datei
+from dotenv import load_dotenv
+load_dotenv('/root/.ibgateway.env')
+
+# Umgebungsvariablen
+LOGIN = os.getenv('IBKR_LOGIN')
+PASSWORD = os.getenv('IBKR_PASSWORD')
+SECRET = os.getenv('IBKR_TOTP_SECRET')
+GATEWAY = '/root/Jts/ibgateway/1030/ibgateway'
+XVFB_DISPLAY = os.getenv('DISPLAY', ':0')
+
+
+def start_xvfb():
+    # Starte Xvfb, falls noch nicht aktiv
+    subprocess.Popen([
+        'Xvfb', XVFB_DISPLAY, '-ac', '-screen', '0', '1024x768x24'
+    ])
+    os.environ['DISPLAY'] = XVFB_DISPLAY
+    time.sleep(3)
+
+
+def launch_gateway():
+    # Starte IB Gateway GUI
+    return subprocess.Popen([GATEWAY, '-role', 'gateway'])
+
+
+def send_keystrokes(totp_code):
+    # Fokussiere das IB Gateway-Fenster und tippe Login, Passwort und 2FA
+    # Suche Fenster anhand des Titels
+    subprocess.call([
+        'xdotool', 'search', '--name', 'IB Gateway', 'windowactivate', '--sync'
+    ])
+    time.sleep(1)
+    
+    # Eintippen der Anmeldedaten
+    subprocess.call(['xdotool', 'type', LOGIN])
+    time.sleep(0.5)
+    subprocess.call(['xdotool', 'key', 'Tab'])
+    time.sleep(0.5)
+    subprocess.call(['xdotool', 'type', PASSWORD])
+    time.sleep(0.5)
+    subprocess.call(['xdotool', 'key', 'Tab'])
+    time.sleep(0.5)
+    subprocess.call(['xdotool', 'type', totp_code])
+    time.sleep(0.5)
+    subprocess.call(['xdotool', 'key', 'Return'])
+
+
+def main():
+    # Xvfb starten
+    start_xvfb()
+
+    # IB Gateway starten
+    process = launch_gateway()
+
+    # Kurze Wartezeit, bis das Login-Fenster erscheint
+    time.sleep(10)
+
+    # TOTP-Code erzeugen und eintippen
+    totp = pyotp.TOTP(SECRET).now()
+    send_keystrokes(totp)
+
+    # Optional: Warte auf Gateway-Prozess
+    process.wait()
+
+
+if __name__ == '__main__':
+    main()
