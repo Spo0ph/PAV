@@ -1,54 +1,46 @@
-# .github/workflows/ibgateway-login.yml
-name: IB Gateway 2FA-Login via GH Actions
+name: IBKR Gateway 2FA-Login
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 8 * * *'    # täglich 08:00 UTC
+    - cron: '0 8 * * *'
 
 jobs:
   login:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Repo
+      - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Start SSH-Agent
+      - name: Start SSH agent
         uses: webfactory/ssh-agent@v0.8.1
         with:
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
 
-      - name: Known Hosts konfigurieren
+      - name: Set up known hosts
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
 
-      - name: Copy login_gateway.py to Server
+      - name: Copy login script to server
         run: |
           scp -o StrictHostKeyChecking=yes \
             login_gateway.py \
             ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/root/login_gateway.py
 
-      - name: Generate .ibgateway.env & Run Login Script
+      - name: Write env and trigger login
         run: |
           ssh -o StrictHostKeyChecking=yes \
             ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << 'EOF'
-            #!/bin/bash
-            set -e
-
-            # Env-File schreiben
-            cat > /root/.ibgateway.env <<EOT
-IBKR_LOGIN="${{ secrets.IBKR_LOGIN }}"
-IBKR_PASSWORD="${{ secrets.IBKR_PASSWORD }}"
-IBKR_TOTP_SECRET="${{ secrets.IBKR_TOTP_SECRET }}"
-DISPLAY=":0"
-EOT
-
-            # Script ausführbar machen
-            chmod +x /root/login_gateway.py
-
-            # Login-Skript ausführen
-            /opt/ibgateway-venv/bin/python /root/login_gateway.py
+          set -e
+          cat > /root/.ibgateway.env << 'EOT'
+          IBKR_LOGIN="${{ secrets.IBKR_LOGIN }}"
+          IBKR_PASSWORD="${{ secrets.IBKR_PASSWORD }}"
+          IBKR_TOTP_SECRET="${{ secrets.IBKR_TOTP_SECRET }}"
+          DISPLAY=":0"
+          EOT
+          chmod +x /root/login_gateway.py
+          systemctl restart ibgateway
           EOF
