@@ -3,45 +3,42 @@ name: IBKR Gateway 2FA-Login
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 8 * * *'
+    - cron: '0 8 * * *'  # täglich um 08:00 UTC
 
 jobs:
   login:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Start SSH agent
-        uses: webfactory/ssh-agent@v0.5.4
+        uses: actions/ssh-agent@v0.5.4
         with:
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
 
-
-      - name: Set up known hosts
+      - name: Configure known hosts
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
 
-      - name: Copy login script to server
-        run: |
-          scp -o StrictHostKeyChecking=yes \
-            login_gateway.py \
-            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/root/login_gateway.py
-
-      - name: Write env and trigger login
+      - name: Trigger IBKR Gateway login on server
         run: |
           ssh -o StrictHostKeyChecking=yes \
             ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << 'EOF'
           set -e
-          cat > /root/.ibgateway.env << 'EOT'
-          IBKR_LOGIN="${{ secrets.IBKR_LOGIN }}"
-          IBKR_PASSWORD="${{ secrets.IBKR_PASSWORD }}"
-          IBKR_TOTP_SECRET="${{ secrets.IBKR_TOTP_SECRET }}"
-          DISPLAY=":0"
-          EOT
+
+          # Export credentials & DISPLAY as environment variables
+          export IBKR_LOGIN="${{ secrets.IBKR_LOGIN }}"
+          export IBKR_PASSWORD="${{ secrets.IBKR_PASSWORD }}"
+          export IBKR_TOTP_SECRET="${{ secrets.IBKR_TOTP_SECRET }}"
+          export DISPLAY=":0"
+
+          # Ensure the login script is executable
           chmod +x /root/login_gateway.py
-          systemctl restart ibgateway
+
+          # Run the login script (uses the shebang to pick up venv python)
+          /root/login_gateway.py
           EOF
