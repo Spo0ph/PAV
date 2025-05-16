@@ -24,6 +24,15 @@ jobs:
           echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
 
+      - name: Ensure pyotp in server venv
+        run: |
+          ssh -o StrictHostKeyChecking=yes \
+            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << 'EOF'
+          set -e
+          # Upgrade pip and install pyotp (and dotenv if still needed)
+          /opt/ibgateway-venv/bin/pip install --upgrade pip pyotp python-dotenv
+          EOF
+
       - name: Trigger IBKR Gateway login on server
         run: |
           ssh -o StrictHostKeyChecking=yes \
