@@ -16,10 +16,13 @@ jobs:
 
       - name: Start ssh-agent and add private key
         run: |
-          # SSH-Agent starten
+          # ssh-agent starten
           eval "$(ssh-agent -s)"
-          # Privaten Key aus Secret in den Agent laden
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" | tr -d '\r' | ssh-add -
+          # Private-Key via printf (bewahrt exakte Zeilenumbrüche)
+          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" \
+            | tr -d '\r' \
+            | ssh-add -
+
       
       - name: Configure known hosts
         run: |
