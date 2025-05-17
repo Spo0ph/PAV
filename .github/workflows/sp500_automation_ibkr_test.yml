@@ -8,13 +8,14 @@ on:
 jobs:
   login:
     runs-on: ubuntu-latest
+    environment: IBKR         # Hier wird das Environment verwendet
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Start SSH agent
-        uses: webfactory/ssh-agent@v0.6.0
+        uses: actions/ssh-agent@v0.6.0
         with:
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
 
@@ -27,18 +28,18 @@ jobs:
       - name: Ensure pyotp in server venv
         run: |
           ssh -o StrictHostKeyChecking=yes ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} bash << 'EOF'
-          set -eux
-          /opt/ibgateway-venv/bin/pip install --upgrade pip pyotp
+            set -eux
+            /opt/ibgateway-venv/bin/pip install --upgrade pip pyotp
           EOF
 
       - name: Trigger IBKR Gateway login on server
         run: |
           ssh -o StrictHostKeyChecking=yes ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} bash << 'EOF'
-          set -eux
-          export IBKR_LOGIN="${{ secrets.IBKR_LOGIN }}"
-          export IBKR_PASSWORD="${{ secrets.IBKR_PASSWORD }}"
-          export IBKR_TOTP_SECRET="${{ secrets.IBKR_TOTP_SECRET }}"
-          export DISPLAY=":0"
-          chmod +x /root/login_gateway.py
-          /root/login_gateway.py
+            set -eux
+            export IBKR_LOGIN="${{ secrets.IBKR_LOGIN }}"
+            export IBKR_PASSWORD="${{ secrets.IBKR_PASSWORD }}"
+            export IBKR_TOTP_SECRET="${{ secrets.IBKR_TOTP_SECRET }}"
+            export DISPLAY=":0"
+            chmod +x /root/login_gateway.py
+            /root/login_gateway.py
           EOF
