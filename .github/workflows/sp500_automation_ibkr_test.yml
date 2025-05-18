@@ -1,56 +1,34 @@
-name: IBKR Gateway 2FA-Login
+name: IBKR Gateway Auto-Login
 
 on:
-  workflow_dispatch:
   schedule:
-    - cron: '0 8 * * *'   # täglich um 08:00 UTC
+    - cron: '0 6 * * *'      # täglich 06:00 UTC
+  workflow_dispatch:
 
 jobs:
   login:
     runs-on: ubuntu-latest
-    environment: IBKR   # zieht Secrets aus dem IBKR-Environment
+    environment: IBKR       # nutzt alle Secrets aus dem Environment
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Start ssh-agent and add private key
+      - name: Install ssh-agent
         run: |
-          # ssh-agent starten
           eval "$(ssh-agent -s)"
-          # Private-Key via printf (bewahrt exakte Zeilenumbrüche)
-          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" \
-            | tr -d '\r' \
-            | ssh-add -
+          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" | tr -d '\r' | ssh-add -
 
-      
-      - name: Configure known hosts
+      - name: Known hosts einrichten
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
 
-
-
-      - name: Ensure pyotp in server venv
+      - name: Trigger CPAPI-Login auf Server
         run: |
           ssh -o StrictHostKeyChecking=no \
-            -i private_key.pem \
-            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} bash << 'EOF'
-            set -eux
-            /opt/ibgateway-venv/bin/pip install --upgrade pip pyotp
-            EOF
-
-      - name: Trigger IBKR Gateway login on server
-        run: |
-          ssh -o StrictHostKeyChecking=no \
-            -i private_key.pem \
-            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} bash << 'EOF'
-            set -eux
-            export IBKR_LOGIN="${{ secrets.IBKR_LOGIN }}"
-            export IBKR_PASSWORD="${{ secrets.IBKR_PASSWORD }}"
-            export IBKR_TOTP_SECRET="${{ secrets.IBKR_TOTP_SECRET }}"
-            export DISPLAY=":0"
-            chmod +x /root/login_gateway.py
-            /root/login_gateway.py
-            EOF
+              ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} \
+            ENV IBKR_LOGIN="${{ secrets.IBKR_LOGIN }}" \
+                IBKR_PASSWORD="${{ secrets.IBKR_PASSWORD }}" \
+                IBKR_TOTP_SECRET="${{ secrets.IBKR_TOTP_SECRET }}" \
+            /opt/ibgateway-venv/bin/python /root/login_cpapi.py
