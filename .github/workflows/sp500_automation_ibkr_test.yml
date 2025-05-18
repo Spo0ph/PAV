@@ -1,34 +1,39 @@
-name: IBKR Gateway Auto-Login
+name: Daily IBKR Gateway Auto-Login
 
 on:
   schedule:
-    - cron: '0 6 * * *'      # täglich 06:00 UTC
+    - cron: '0 6 * * *'    # täglich 06:00 UTC
   workflow_dispatch:
 
 jobs:
   login:
     runs-on: ubuntu-latest
-    environment: IBKR       # nutzt alle Secrets aus dem Environment
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Install ssh-agent
+      - name: SSH-Agent starten und Key laden
         run: |
           eval "$(ssh-agent -s)"
           printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" | tr -d '\r' | ssh-add -
 
-      - name: Known hosts einrichten
+      - name: Known hosts konfigurieren
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          echo "${{ secrets.SSH_KNOW_HOSTS }}" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
 
-      - name: Trigger CPAPI-Login auf Server
+      - name: IBKR CPAPI-Login auf Server ausführen
+        env:
+          IBKR_LOGIN:       ${{ secrets.IBKR_LOGIN }}
+          IBKR_PASSWORD:    ${{ secrets.IBKR_PASSWORD }}
+          IBKR_TOTP_SECRET: ${{ secrets.IBKR_TOTP_SECRET }}
         run: |
           ssh -o StrictHostKeyChecking=no \
               ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} \
-            ENV IBKR_LOGIN="${{ secrets.IBKR_LOGIN }}" \
-                IBKR_PASSWORD="${{ secrets.IBKR_PASSWORD }}" \
-                IBKR_TOTP_SECRET="${{ secrets.IBKR_TOTP_SECRET }}" \
-            /opt/ibgateway-venv/bin/python /root/login_cpapi.py
+            "IBKR_LOGIN=${IBKR_LOGIN} \
+             IBKR_PASSWORD=${IBKR_PASSWORD} \
+             IBKR_TOTP_SECRET=${IBKR_TOTP_SECRET} \
+             /opt/ibgateway-venv/bin/python /root/login_gateway.py"
+
