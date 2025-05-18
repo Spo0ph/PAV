@@ -1,52 +1,46 @@
-name: IBKR Gateway 2FA-Login
-
-on:
-  workflow_dispatch:
-  schedule:
-    - cron: '0 8 * * *'   # täglich um 08:00 UTC
-
-jobs:
-  login:
-    runs-on: ubuntu-latest
-    environment: IBKR   # zieht Secrets aus dem IBKR-Environment
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Start ssh-agent and add private key
         run: |
-          # ssh-agent starten
           eval "$(ssh-agent -s)"
-          # Private-Key via printf (bewahrt exakte Zeilenumbrüche)
-          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" \
-            | tr -d '\r' \
-            | ssh-add -
+          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" | tr -d '\r' | ssh-add -
 
-      
       - name: Configure known hosts
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
 
+      - name: Debug SSH connection
+        run: |
+          # Private Key in temporäre Datei schreiben
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > private_key.pem
+          chmod 600 private_key.pem
+
+          # Verbose SSH-Versuch
+          ssh -vvv -i private_key.pem -o StrictHostKeyChecking=no \
+            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} \
+            echo "SSH connection succeeded!" || echo "SSH connection failed!"
+
       - name: Ensure pyotp in server venv
         run: |
           ssh -o StrictHostKeyChecking=yes \
             ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} bash << 'EOF'
-          set -eux
-          /opt/ibgateway-venv/bin/pip install --upgrade pip pyotp
-          EOF
+            set -eux
+            /opt/ibgateway-venv/bin/pip install --upgrade pip pyotp
+            EOF
 
       - name: Trigger IBKR Gateway login on server
         run: |
           ssh -o StrictHostKeyChecking=yes \
             ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} bash << 'EOF'
-          set -eux
-          export IBKR_LOGIN="${{ secrets.IBKR_LOGIN }}"
-          export IBKR_PASSWORD="${{ secrets.IBKR_PASSWORD }}"
-          export IBKR_TOTP_SECRET="${{ secrets.IBKR_TOTP_SECRET }}"
-          export DISPLAY=":0"
-          chmod +x /root/login_gateway.py
-          /root/login_gateway.py
-          EOF
+            set -eux
+            export IBKR_LOGIN="${{ secrets.IBKR_LOGIN }}"
+            export IBKR_PASSWORD="${{ secrets.IBKR_PASSWORD }}"
+            export IBKR_TOTP_SECRET="${{ secrets.IBKR_TOTP_SECRET }}"
+            export DISPLAY=":0"
+            chmod +x /root/login_gateway.py
+            /root/login_gateway.py
+            EOF
