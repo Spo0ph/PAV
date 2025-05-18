@@ -31,35 +31,26 @@ jobs:
           chmod 600 ~/.ssh/known_hosts
 
 
-      - name: Debug SSH connection
-        run: |
-          # Private Key in temporäre Datei schreiben
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > private_key.pem
-          chmod 600 private_key.pem
 
-          # Verbose SSH-Versuch
-          ssh -vvv -i private_key.pem -o StrictHostKeyChecking=no \
-            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} \
-            echo "SSH connection succeeded!" || echo "SSH connection failed!"
-
-            
       - name: Ensure pyotp in server venv
         run: |
-          ssh -o StrictHostKeyChecking=yes \
+          ssh -o StrictHostKeyChecking=no \
+            -i private_key.pem \
             ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} bash << 'EOF'
-          set -eux
-          /opt/ibgateway-venv/bin/pip install --upgrade pip pyotp
-          EOF
+            set -eux
+            /opt/ibgateway-venv/bin/pip install --upgrade pip pyotp
+            EOF
 
       - name: Trigger IBKR Gateway login on server
         run: |
-          ssh -o StrictHostKeyChecking=yes \
+          ssh -o StrictHostKeyChecking=no \
+            -i private_key.pem \
             ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} bash << 'EOF'
-          set -eux
-          export IBKR_LOGIN="${{ secrets.IBKR_LOGIN }}"
-          export IBKR_PASSWORD="${{ secrets.IBKR_PASSWORD }}"
-          export IBKR_TOTP_SECRET="${{ secrets.IBKR_TOTP_SECRET }}"
-          export DISPLAY=":0"
-          chmod +x /root/login_gateway.py
-          /root/login_gateway.py
-          EOF
+            set -eux
+            export IBKR_LOGIN="${{ secrets.IBKR_LOGIN }}"
+            export IBKR_PASSWORD="${{ secrets.IBKR_PASSWORD }}"
+            export IBKR_TOTP_SECRET="${{ secrets.IBKR_TOTP_SECRET }}"
+            export DISPLAY=":0"
+            chmod +x /root/login_gateway.py
+            /root/login_gateway.py
+            EOF
