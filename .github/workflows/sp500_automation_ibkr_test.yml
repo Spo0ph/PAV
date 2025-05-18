@@ -16,12 +16,15 @@ jobs:
       - name: SSH-Agent starten und Key laden
         run: |
           eval "$(ssh-agent -s)"
-          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" | tr -d '\r' | ssh-add -
+          # Mit printf das Secret wörtlich ausgeben, CR entfernen und in ssh-add pipen
+          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" \
+            | tr -d '\r' \
+            | ssh-add -
 
       - name: Known hosts konfigurieren
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_KNOW_HOSTS }}" > ~/.ssh/known_hosts
+          echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
 
       - name: IBKR CPAPI-Login auf Server ausführen
@@ -36,4 +39,3 @@ jobs:
              IBKR_PASSWORD=${IBKR_PASSWORD} \
              IBKR_TOTP_SECRET=${IBKR_TOTP_SECRET} \
              /opt/ibgateway-venv/bin/python /root/login_gateway.py"
-
